@@ -12,22 +12,32 @@ const API_KEY = process.env.NEXT_PUBLIC_STREAM_API_KEY;
 const StreamVideoProvider = ({ children }: { children: ReactNode }) => {
   const [videoClient, setVideoClient] = useState<StreamVideoClient>();
   const { user, isLoaded } = useUser();
+  const [displayName, setDisplayName] = useState<string>('');
 
   useEffect(() => {
     if (!isLoaded || !user) return;
     if (!API_KEY) throw new Error('Stream API key is missing');
 
+    // Get saved display name from localStorage or use Clerk username
+    const savedName = localStorage.getItem('meetingUsername');
+    const userName = savedName || user?.username || user?.id;
+    setDisplayName(userName);
+
     const client = new StreamVideoClient({
       apiKey: API_KEY,
       user: {
         id: user?.id,
-        name: user?.username || user?.id,
+        name: userName,
         image: user?.imageUrl,
       },
       tokenProvider,
     });
 
     setVideoClient(client);
+
+    return () => {
+      client.disconnectUser();
+    };
   }, [user, isLoaded]);
 
   if (!videoClient) return <Loader />;

@@ -1,18 +1,107 @@
 'use client';
 
 import { Call, CallRecording } from '@stream-io/video-react-sdk';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import Loader from './Loader';
 import { useGetCalls } from '@/hooks/useGetCalls';
 import MeetingCard from './MeetingCard';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+
+// Configuration for rate limiting
+const BATCH_SIZE = 3; // Process 3 calls at a time
+const DELAY_MS = 1000; // Wait 1 second between batches
 
 const CallList = ({ type }: { type: 'ended' | 'upcoming' | 'recordings' }) => {
   const router = useRouter();
-  const { endedCalls, upcomingCalls, callRecordings, isLoading } =
-    useGetCalls();
+  const { endedCalls, upcomingCalls, callRecordings, isLoading } = useGetCalls();
   const [recordings, setRecordings] = useState<CallRecording[]>([]);
+  const [fetchingRecordings, setFetchingRecordings] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const getCallTitle = (meeting: Call | CallRecording) => {
+    if ('state' in meeting) {
+      if (meeting.state?.custom?.topic) {
+        return meeting.state.custom.topic;
+      }
+      if (meeting.state?.custom?.creatorId) {
+        const savedTopic = localStorage.getItem(`meetingTopic_${meeting.state.custom.creatorId}`);
+        if (savedTopic) return savedTopic;
+      }
+      return meeting.state?.custom?.description || 'No Description';
+    } else {
+      const parentCallId = meeting.filename.split('_')[2];
+      if (parentCallId) {
+        const savedTopic = localStorage.getItem(`meetingTopic_${parentCallId}`);
+        if (savedTopic) return savedTopic;
+      }
+      const formattedDate = meeting.start_time 
+        ? new Date(meeting.start_time).toLocaleDateString()
+        : '';
+      return `Recording - ${formattedDate}`;
+    }
+  };
+
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  const processBatch = async (calls: Call[], startIdx: number) => {
+    const batch = calls.slice(startIdx, startIdx + BATCH_SIZE);
+    if (batch.length === 0) return [];
+
+    try {
+      const batchResults = await Promise.all(
+        batch.map(async (call) => {
+          try {
+            return await call.queryRecordings();
+          } catch (err) {
+            console.warn(`Failed to fetch recordings for call ${call.id}:`, err);
+            return { recordings: [] };
+          }
+        })
+      );
+      return batchResults;
+    } catch (err) {
+      console.error('Batch processing failed:', err);
+      throw err;
+    }
+  };
+
+  const fetchRecordings = async () => {
+    if (!callRecordings?.length) return;
+    
+    setFetchingRecordings(true);
+    setError(null);
+
+    try {
+      const allRecordings: CallRecording[] = [];
+
+      for (let i = 0; i < callRecordings.length; i += BATCH_SIZE) {
+        try {
+          const batchResults = await processBatch(callRecordings, i);
+          
+          const batchRecordings = batchResults
+            .filter(result => result.recordings?.length > 0)
+            .flatMap(result => result.recordings);
+          
+          allRecordings.push(...batchRecordings);
+
+          if (i + BATCH_SIZE < callRecordings.length) {
+            await delay(DELAY_MS);
+          }
+        } catch (err) {
+          console.error(`Failed to process batch starting at index ${i}:`, err);
+          // Continue with next batch despite errors
+        }
+      }
+
+      setRecordings(allRecordings);
+    } catch (err) {
+      setError('Failed to fetch recordings. Please try again later.');
+      console.error('Error fetching recordings:', err);
+    } finally {
+      setFetchingRecordings(false);
+    }
+  };
 
   const getCalls = () => {
     switch (type) {
@@ -41,24 +130,20 @@ const CallList = ({ type }: { type: 'ended' | 'upcoming' | 'recordings' }) => {
   };
 
   useEffect(() => {
-    const fetchRecordings = async () => {
-      const callData = await Promise.all(
-        callRecordings?.map((meeting) => meeting.queryRecordings()) ?? [],
-      );
-
-      const recordings = callData
-        .filter((call) => call.recordings.length > 0)
-        .flatMap((call) => call.recordings);
-
-      setRecordings(recordings);
-    };
-
     if (type === 'recordings') {
       fetchRecordings();
     }
   }, [type, callRecordings]);
 
-  if (isLoading) return <Loader />;
+  if (isLoading || fetchingRecordings) return <Loader />;
+
+  if (error) {
+    return (
+      <div className="text-red-500 text-center p-4">
+        {error}
+      </div>
+    );
+  }
 
   const calls = getCalls();
   const noCallsMessage = getNoCallsMessage();
@@ -68,19 +153,15 @@ const CallList = ({ type }: { type: 'ended' | 'upcoming' | 'recordings' }) => {
       {calls && calls.length > 0 ? (
         calls.map((meeting: Call | CallRecording) => (
           <MeetingCard
-            key={(meeting as Call).id}
+            key={(meeting as Call).id || (meeting as CallRecording).filename}
             icon={
               type === 'ended'
                 ? '/icons/previous.svg'
                 : type === 'upcoming'
-                  ? '/icons/upcoming.svg'
-                  : '/icons/recordings.svg'
+                ? '/icons/upcoming.svg'
+                : '/icons/recordings.svg'
             }
-            title={
-              (meeting as Call).state?.custom?.description ||
-              (meeting as CallRecording).filename?.substring(0, 20) ||
-              'No Description'
-            }
+            title={getCallTitle(meeting)}
             date={
               (meeting as Call).state?.startsAt?.toLocaleString() ||
               (meeting as CallRecording).start_time?.toLocaleString()
