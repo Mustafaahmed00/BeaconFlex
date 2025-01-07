@@ -12,6 +12,7 @@ import {
 } from '@stream-io/video-react-sdk';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Users, LayoutList } from 'lucide-react';
+import DualCameraView from './DualCameraView';
 
 import {
   DropdownMenu,
@@ -22,7 +23,7 @@ import {
 } from './ui/dropdown-menu';
 import Loader from './Loader';
 import EndCallButton from './EndCallButton';
-import CameraSwitcher from './CameraSwitcher';
+import CameraSwitcher from './DualCameraView';
 import RecordingControl from './RecordingControl';
 import { cn } from '@/lib/utils';
 
@@ -70,7 +71,7 @@ const MeetingRoom = () => {
       <div className="fixed bottom-0 flex w-full items-center justify-center gap-5">
         <CallControls onLeave={() => router.push(`/`)} />
         
-        <CameraSwitcher />
+        <DualCameraView />
         
         <RecordingControl />
 
