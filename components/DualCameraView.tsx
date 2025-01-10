@@ -1,104 +1,92 @@
-import React, { useState, useEffect } from 'react';
-import { useCall } from '@stream-io/video-react-sdk';
+import React, { useState, useEffect, useRef } from 'react';
 import { Camera, Loader2, Maximize2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 
 interface CameraStream {
-  deviceId: string;
+  stream: MediaStream | null;
   label: string;
-  isMainView: boolean;
 }
 
 const DualCameraView = () => {
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeStreams, setActiveStreams] = useState<CameraStream[]>([]);
-  const call = useCall();
+  const [primaryStream, setPrimaryStream] = useState<CameraStream>({ stream: null, label: 'Primary Camera' });
+  const [secondaryStream, setSecondaryStream] = useState<CameraStream>({ stream: null, label: 'Secondary Camera' });
+  const [isSecondaryLarge, setIsSecondaryLarge] = useState(false);
+  const primaryVideoRef = useRef<HTMLVideoElement>(null);
+  const secondaryVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    const getCameras = async () => {
+    const initializeCameras = async () => {
       try {
-        await navigator.mediaDevices.getUserMedia({ video: true });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        setPrimaryStream({ stream, label: 'Primary Camera' });
+        if (primaryVideoRef.current) {
+          primaryVideoRef.current.srcObject = stream;
+        }
+
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(device => device.kind === 'videoinput');
         setCameras(videoDevices);
-        
-        if (videoDevices.length > 0 && call) {
-          const stream = await call.camera.state.mediaStream;
-          if (stream) {
-            const videoTrack = stream.getVideoTracks()[0];
-            if (videoTrack) {
-              const settings = videoTrack.getSettings();
-              setActiveStreams([{
-                deviceId: settings.deviceId || videoDevices[0].deviceId,
-                label: videoDevices[0].label || 'Main Camera',
-                isMainView: true
-              }]);
-            }
-          }
-        }
         setLoading(false);
       } catch (error) {
-        console.error('Error getting cameras:', error);
+        console.error('Error initializing cameras:', error);
         setLoading(false);
       }
     };
 
-    getCameras();
-    navigator.mediaDevices.addEventListener('devicechange', getCameras);
-    return () => {
-      navigator.mediaDevices.removeEventListener('devicechange', getCameras);
-    };
-  }, [call]);
+    initializeCameras();
 
-  const switchCamera = async (deviceId: string) => {
+    return () => {
+      if (primaryStream.stream) {
+        primaryStream.stream.getTracks().forEach(track => track.stop());
+      }
+      if (secondaryStream.stream) {
+        secondaryStream.stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  const switchCamera = async (deviceId: string, label: string) => {
     try {
-      if (!call || activeStreams.some(stream => stream.deviceId === deviceId)) return;
-      
-      setLoading(true);
-      await call.camera.disable();
-      await navigator.mediaDevices.getUserMedia({
+      if (secondaryStream.stream) {
+        secondaryStream.stream.getTracks().forEach(track => track.stop());
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
         video: { deviceId: { exact: deviceId } }
       });
-      await call.camera.enable();
-
-      setActiveStreams(prev => {
-        if (prev.length === 0) {
-          return [{
-            deviceId,
-            label: cameras.find(cam => cam.deviceId === deviceId)?.label || 'Camera',
-            isMainView: true
-          }];
-        }
-        return [...prev, {
-          deviceId,
-          label: cameras.find(cam => cam.deviceId === deviceId)?.label || 'Camera',
-          isMainView: false
-        }].slice(0, 2); // Limit to 2 cameras
-      });
+      
+      setSecondaryStream({ stream, label });
+      if (secondaryVideoRef.current) {
+        secondaryVideoRef.current.srcObject = stream;
+      }
     } catch (error) {
       console.error('Error switching camera:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const swapViews = () => {
-    setActiveStreams(prev => prev.map(stream => ({
-      ...stream,
-      isMainView: !stream.isMainView
-    })));
+  const swapCameras = () => {
+    if (!primaryStream.stream || !secondaryStream.stream) return;
+    
+    const tempStream = primaryStream;
+    setPrimaryStream(secondaryStream);
+    setSecondaryStream(tempStream);
+    
+    if (primaryVideoRef.current && secondaryVideoRef.current) {
+      primaryVideoRef.current.srcObject = secondaryStream.stream;
+      secondaryVideoRef.current.srcObject = tempStream.stream;
+    }
   };
 
   if (loading) {
     return (
-      <div className="cursor-pointer rounded-2xl bg-dark-3 px-4 py-2">
+      <div className="flex-center rounded-lg bg-dark-3 p-2">
         <Loader2 className="h-5 w-5 animate-spin text-white" />
       </div>
     );
@@ -107,17 +95,14 @@ const DualCameraView = () => {
   return (
     <div className="relative">
       <DropdownMenu>
-        <DropdownMenuTrigger className="cursor-pointer rounded-2xl bg-dark-3 px-4 py-2 hover:bg-dark-4">
+        <DropdownMenuTrigger className="flex-center rounded-lg bg-dark-3 p-2 hover:bg-dark-4">
           <Camera className="h-5 w-5 text-white" />
         </DropdownMenuTrigger>
         <DropdownMenuContent className="bg-dark-2 text-white">
           {cameras.map((camera) => (
             <DropdownMenuItem
               key={camera.deviceId}
-              onClick={() => switchCamera(camera.deviceId)}
-              className={activeStreams.some(stream => stream.deviceId === camera.deviceId) 
-                ? "bg-dark-4" 
-                : ""}
+              onClick={() => switchCamera(camera.deviceId, camera.label)}
             >
               {camera.label || `Camera ${camera.deviceId.slice(0, 5)}`}
             </DropdownMenuItem>
@@ -125,33 +110,63 @@ const DualCameraView = () => {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {activeStreams.length === 2 && (
-        <div className="fixed bottom-24 right-4 flex flex-col gap-4">
-          <div className="relative w-64 aspect-video bg-dark-2 rounded-lg overflow-hidden">
-            {activeStreams.map(stream => (
-              <div
-                key={stream.deviceId}
-                className={`absolute inset-0 transition-all duration-300 ${
-                  stream.isMainView 
-                    ? "w-full h-full" 
-                    : "w-32 h-24 bottom-4 right-4 shadow-lg rounded-lg"
-                }`}
-              >
-                <div className="absolute top-2 left-2 z-10 bg-black/50 px-2 py-1 rounded text-sm">
-                  {stream.label}
-                </div>
-                <div className="h-full w-full bg-dark-3 rounded" />
+      <div className="fixed bottom-24 right-4 flex flex-col gap-4">
+        <div className="relative aspect-video w-64 overflow-hidden rounded-lg bg-dark-2">
+          {/* Primary Camera */}
+          <video
+            ref={primaryVideoRef}
+            autoPlay
+            playsInline
+            muted
+            className="h-full w-full object-cover"
+          />
+          
+          {/* Secondary Camera */}
+          {secondaryStream.stream && (
+            <div className={`absolute transition-all duration-300 ${
+              isSecondaryLarge 
+                ? "inset-0 h-full w-full z-10" 
+                : "bottom-4 right-4 h-24 w-32 rounded-lg shadow-lg"
+            }`}>
+              <div className="absolute left-2 top-2 z-10 rounded bg-black/50 px-2 py-1 text-sm">
+                {secondaryStream.label}
               </div>
-            ))}
-            <button
-              onClick={swapViews}
-              className="absolute top-2 right-2 z-20 bg-dark-1/50 p-2 rounded-full hover:bg-dark-1"
-            >
-              <Maximize2 className="h-4 w-4 text-white" />
-            </button>
-          </div>
+              <video
+                ref={secondaryVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="h-full w-full object-cover rounded-lg"
+              />
+            </div>
+          )}
+
+          {secondaryStream.stream && (
+            <>
+              <button
+                onClick={() => setIsSecondaryLarge(!isSecondaryLarge)}
+                className="absolute right-2 top-2 z-20 rounded-full bg-dark-1/50 p-2 hover:bg-dark-1"
+              >
+                <Maximize2 className="h-4 w-4 text-white" />
+              </button>
+              <button
+                onClick={swapCameras}
+                className="absolute right-2 top-12 z-20 rounded-full bg-dark-1/50 p-2 hover:bg-dark-1"
+              >
+                <svg 
+                  className="h-4 w-4 text-white" 
+                  viewBox="0 0 24 24" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  strokeWidth="2"
+                >
+                  <path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 };
