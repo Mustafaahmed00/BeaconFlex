@@ -17,9 +17,10 @@ const Sidebar = ({ isCollapsed, onToggleCollapse }: SidebarProps) => {
   const pathname = usePathname();
 
   return (
-    <section 
+    <section
       className={cn(
-        "sticky left-0 top-0 flex h-screen flex-col justify-between bg-dark-1 text-white transition-all duration-300 ease-in-out max-sm:hidden",
+        "fixed left-0 top-0 flex h-screen flex-col justify-between bg-dark-1 text-white",
+        "transition-all duration-300 ease-in-out max-sm:hidden z-40",
         isCollapsed ? "w-[78px]" : "w-[264px]",
         "pt-28" // Maintain space for navbar
       )}

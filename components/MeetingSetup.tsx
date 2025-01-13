@@ -71,19 +71,25 @@ const MeetingSetup = ({
       />
     );
 
-  const handleJoinMeeting = async () => {
-    if (!username.trim()) return;
-
-    try {
-      // Save username for future use
-      localStorage.setItem('meetingUsername', username);
-
-      await call.join();
-      setIsSetupComplete(true);
-    } catch (error) {
-      console.error('Error joining meeting:', error);
-    }
-  };
+    const handleJoinMeeting = async () => {
+      if (!username.trim()) return;
+    
+      try {
+        localStorage.setItem('meetingUsername', username);
+        
+        // Add this line
+        await call.update({
+          custom: {
+            displayName: username
+          }
+        });
+        
+        await call.join();
+        setIsSetupComplete(true);
+      } catch (error) {
+        console.error('Error joining meeting:', error);
+      }
+    };
 
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center gap-6 text-white">
