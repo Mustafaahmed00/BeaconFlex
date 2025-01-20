@@ -12,7 +12,7 @@ import {
 } from '@stream-io/video-react-sdk';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Users, LayoutList } from 'lucide-react';
-import DualCameraView from './DualCameraView';
+import DualCameraView from './MultiCameraView';
 
 import {
   DropdownMenu,
@@ -23,7 +23,7 @@ import {
 } from './ui/dropdown-menu';
 import Loader from './Loader';
 import EndCallButton from './EndCallButton';
-import CameraSwitcher from './DualCameraView';
+import CameraSwitcher from './MultiCameraView';
 import RecordingControl from './RecordingControl';
 import { cn } from '@/lib/utils';
 
