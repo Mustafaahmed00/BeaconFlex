@@ -19,31 +19,32 @@ interface CameraView {
 const MultiCameraView = () => {
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeViews, setActiveViews] = useState<CameraView[]>([]);
+  const [views, setViews] = useState<CameraView[]>([]);
   const call = useCall();
 
-  // Initialize cameras and first view
+  // Initialize cameras
   useEffect(() => {
-    const initializeCameras = async () => {
+    const getCameras = async () => {
       try {
         await navigator.mediaDevices.getUserMedia({ video: true });
         const devices = await navigator.mediaDevices.enumerateDevices();
         const videoDevices = devices.filter(device => device.kind === 'videoinput');
         setCameras(videoDevices);
-        
+
         if (videoDevices.length > 0) {
           const stream = await navigator.mediaDevices.getUserMedia({
             video: { deviceId: { exact: videoDevices[0].deviceId } }
           });
-          
-          setActiveViews([{
+
+          setViews([{
             id: '1',
             stream,
             deviceId: videoDevices[0].deviceId,
             label: videoDevices[0].label || 'Camera 1',
-            isMaximized: false
+            isMaximized: false,
           }]);
         }
+
         setLoading(false);
       } catch (error) {
         console.error('Error initializing cameras:', error);
@@ -51,10 +52,10 @@ const MultiCameraView = () => {
       }
     };
 
-    initializeCameras();
+    getCameras();
 
     return () => {
-      activeViews.forEach(view => {
+      views.forEach(view => {
         if (view.stream) {
           view.stream.getTracks().forEach(track => track.stop());
         }
@@ -62,62 +63,81 @@ const MultiCameraView = () => {
     };
   }, []);
 
-  // Add a new camera view
   const addCamera = async () => {
-    if (activeViews.length >= 3) return;
+    if (views.length >= 3) {
+      console.log('Maximum of 3 cameras reached');
+      return;
+    }
 
-    const usedDeviceIds = activeViews.map(v => v.deviceId);
-    const availableCamera = cameras.find(cam => !usedDeviceIds.includes(cam.deviceId));
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(device => device.kind === 'videoinput');
 
-    if (availableCamera) {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { deviceId: { exact: availableCamera.deviceId } }
-        });
+      // Find an available camera (even if it's already in use)
+      const availableCamera = videoDevices.find(camera => 
+        !views.some(view => view.deviceId === camera.deviceId)
+      );
 
-        const newView: CameraView = {
-          id: (activeViews.length + 1).toString(),
-          stream,
-          deviceId: availableCamera.deviceId,
-          label: availableCamera.label || `Camera ${activeViews.length + 1}`,
-          isMaximized: false
-        };
+      // If no unused camera is found, reuse the first camera
+      const cameraToUse = availableCamera || videoDevices[0];
 
-        setActiveViews(prev => [...prev, newView]);
-      } catch (error) {
-        console.error('Error adding camera:', error);
+      if (!cameraToUse) {
+        console.log('No cameras available');
+        return;
       }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: cameraToUse.deviceId } }
+      });
+
+      const newView: CameraView = {
+        id: Date.now().toString(),
+        stream,
+        deviceId: cameraToUse.deviceId,
+        label: cameraToUse.label || `Camera ${views.length + 1}`,
+        isMaximized: false,
+      };
+
+      setViews(prev => [...prev, newView]);
+    } catch (error) {
+      console.error('Error adding camera:', error);
     }
   };
 
-  // Remove a camera view
   const removeCamera = (viewId: string) => {
-    setActiveViews(prev => {
-      const view = prev.find(v => v.id === viewId);
-      if (view?.stream) {
-        view.stream.getTracks().forEach(track => track.stop());
-      }
-      return prev.filter(v => v.id !== viewId);
-    });
-  };
-
-  // Switch camera for a specific view
-  const switchCamera = async (viewId: string, deviceId: string, label: string) => {
-    try {
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: deviceId } }
-      });
-
-      setActiveViews(prev => prev.map(view => {
+    setViews(prev => {
+      const newViews = prev.filter(view => {
         if (view.id === viewId) {
           if (view.stream) {
             view.stream.getTracks().forEach(track => track.stop());
           }
+          return false;
+        }
+        return true;
+      });
+      return newViews;
+    });
+  };
+
+  const switchCamera = async (viewId: string, newDeviceId: string) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: newDeviceId } }
+      });
+
+      setViews(prev => prev.map(view => {
+        if (view.id === viewId) {
+          if (view.stream) {
+            view.stream.getTracks().forEach(track => track.stop());
+          }
+
+          const camera = cameras.find(c => c.deviceId === newDeviceId);
+
           return {
             ...view,
-            stream: newStream,
-            deviceId,
-            label: label || `Camera ${view.id}`
+            stream,
+            deviceId: newDeviceId,
+            label: camera?.label || view.label
           };
         }
         return view;
@@ -128,10 +148,9 @@ const MultiCameraView = () => {
   };
 
   const toggleMaximize = (viewId: string) => {
-    setActiveViews(prev => prev.map(view => ({
-      ...view,
-      isMaximized: view.id === viewId ? !view.isMaximized : false
-    })));
+    setViews(prev => prev.map(view =>
+      view.id === viewId ? { ...view, isMaximized: !view.isMaximized } : view
+    ));
   };
 
   if (loading) {
@@ -142,97 +161,88 @@ const MultiCameraView = () => {
     );
   }
 
-  const getViewSize = (view: CameraView) => {
-    const isAnyMaximized = activeViews.some(v => v.isMaximized);
-    
-    if (view.isMaximized) {
-      return "w-[640px] h-[360px]";
-    }
-    
-    if (isAnyMaximized) {
-      return "w-[160px] h-[90px]";
-    }
-    
-    switch (activeViews.length) {
-      case 1:
-        return "w-[640px] h-[360px]";
-      case 2:
-        return "w-[320px] h-[180px]";
-      case 3:
-        return "w-[320px] h-[180px]";
-      default:
-        return "w-[640px] h-[360px]";
-    }
+  const getSizeClasses = (isMaximized: boolean) => {
+    return isMaximized ? 'w-[640px] h-[360px]' : 'w-[320px] h-[180px]';
   };
+
+  const canAddMoreCameras = views.length < 3;
 
   return (
     <div className="fixed bottom-24 right-4">
-      <div className={`flex gap-2 flex-wrap justify-end items-end max-w-[1280px]`}>
-        {activeViews.map((view) => (
-          <div 
-            key={view.id}
-            className={`relative transition-all duration-300 rounded-lg overflow-hidden ${getViewSize(view)}`}
-            style={{ 
-              zIndex: view.isMaximized ? 20 : 10,
-            }}
+      <div className="flex flex-col items-end gap-2">
+        {/* Add Camera Button */}
+        {canAddMoreCameras && (
+          <button
+            onClick={addCamera}
+            className="flex items-center gap-2 rounded-lg bg-blue-500 px-3 py-2 text-white hover:bg-blue-600"
           >
-            <div className="absolute left-2 top-2 z-30 flex items-center gap-2">
-              <DropdownMenu>
-                <DropdownMenuTrigger className="rounded-lg bg-dark-3/50 p-2 hover:bg-dark-4/50">
-                  <Camera className="h-4 w-4 text-white" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="bg-dark-2 text-white">
-                  {cameras.map((camera) => (
-                    <DropdownMenuItem
-                      key={camera.deviceId}
-                      onClick={() => switchCamera(view.id, camera.deviceId, camera.label)}
-                    >
-                      {camera.label || `Camera ${view.id}`}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <button
-                onClick={() => toggleMaximize(view.id)}
-                className="rounded-lg bg-dark-3/50 p-2 hover:bg-dark-4/50"
-              >
-                {view.isMaximized ? 
-                  <MinusSquare className="h-4 w-4 text-white" /> : 
-                  <Maximize2 className="h-4 w-4 text-white" />
-                }
-              </button>
-              {activeViews.length > 1 && (
+            <Plus className="h-4 w-4" />
+            <span>Add Camera</span>
+          </button>
+        )}
+
+        {/* Camera Views */}
+        <div className="flex flex-wrap items-end justify-end gap-2">
+          {views.map((view) => (
+            <div
+              key={view.id}
+              className={`relative overflow-hidden rounded-lg ${getSizeClasses(view.isMaximized)}`}
+            >
+              {/* Control buttons */}
+              <div className="absolute left-2 top-2 z-30 flex items-center gap-2">
+                {/* Camera selector dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger className="rounded-lg bg-dark-3/50 p-2 hover:bg-dark-4/50">
+                    <Camera className="h-4 w-4 text-white" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="bg-dark-2 text-white">
+                    {cameras.map((camera) => (
+                      <DropdownMenuItem
+                        key={camera.deviceId}
+                        onClick={() => switchCamera(view.id, camera.deviceId)}
+                      >
+                        {camera.label || `Camera ${cameras.indexOf(camera) + 1}`}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                {/* Maximize/Minimize button */}
+                <button
+                  onClick={() => toggleMaximize(view.id)}
+                  className="rounded-lg bg-dark-3/50 p-2 hover:bg-dark-4/50"
+                >
+                  {view.isMaximized ? (
+                    <MinusSquare className="h-4 w-4 text-white" />
+                  ) : (
+                    <Maximize2 className="h-4 w-4 text-white" />
+                  )}
+                </button>
+
+                {/* Remove camera button */}
                 <button
                   onClick={() => removeCamera(view.id)}
                   className="rounded-lg bg-red-500/50 p-2 hover:bg-red-600/50"
                 >
                   <X className="h-4 w-4 text-white" />
                 </button>
+              </div>
+
+              {/* Video element */}
+              {view.stream && (
+                <video
+                  autoPlay
+                  playsInline
+                  muted
+                  ref={(element) => {
+                    if (element) element.srcObject = view.stream;
+                  }}
+                  className="h-full w-full object-cover bg-dark-2"
+                />
               )}
             </div>
-            <video
-              autoPlay
-              playsInline
-              muted
-              ref={(element) => {
-                if (element && view.stream) {
-                  element.srcObject = view.stream;
-                }
-              }}
-              className="h-full w-full object-cover bg-dark-2"
-            />
-          </div>
-        ))}
-        
-        {/* Add Camera Button */}
-        {activeViews.length < 3 && cameras.length > activeViews.length && (
-          <button
-            onClick={addCamera}
-            className="rounded-lg bg-dark-3 p-2 hover:bg-dark-4 transition-colors"
-          >
-            <Plus className="h-6 w-6 text-white" />
-          </button>
-        )}
+          ))}
+        </div>
       </div>
     </div>
   );
