@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   DeviceSettings,
   VideoPreview,
@@ -28,6 +28,8 @@ const MeetingSetup = ({
   const call = useCall();
   const [username, setUsername] = useState('');
   const [isMicCamToggled, setIsMicCamToggled] = useState(false);
+  const [error, setError] = useState('');
+  const videoPreviewRef = useRef<HTMLDivElement>(null); // Ref for the video preview container
 
   if (!call) {
     throw new Error(
@@ -56,6 +58,56 @@ const MeetingSetup = ({
     }
   }, [isMicCamToggled, call.camera, call.microphone]);
 
+  // Update the username overlay dynamically
+  useEffect(() => {
+    const videoContainer = videoPreviewRef.current;
+    if (videoContainer) {
+      // Remove any existing username overlay
+      const existingOverlay = videoContainer.querySelector('.username-overlay');
+      if (existingOverlay) {
+        existingOverlay.remove();
+      }
+
+      // Add a new username overlay
+      if (username) {
+        const overlay = document.createElement('div');
+        overlay.className =
+          'username-overlay absolute bottom-2 left-2 bg-black/50 px-2 py-1 rounded text-sm text-white flex items-center gap-2';
+        overlay.innerHTML = `
+          ${user?.imageUrl ? `<img src="${user.imageUrl}" alt="Profile" class="w-6 h-6 rounded-full" />` : ''}
+          <span>${username}</span>
+        `;
+        videoContainer.appendChild(overlay);
+      }
+    }
+  }, [username, user?.imageUrl]); // Update the overlay whenever the username or profile picture changes
+
+  const handleJoinMeeting = async () => {
+    if (!username.trim()) {
+      setError('Please enter a valid username.');
+      return;
+    }
+
+    try {
+      // Save username to localStorage
+      localStorage.setItem('meetingUsername', username);
+
+      // Update the call with the custom display name
+      await call.update({
+        custom: {
+          displayName: username,
+        },
+      });
+
+      // Join the call
+      await call.join();
+      setIsSetupComplete(true);
+    } catch (error) {
+      console.error('Error joining meeting:', error);
+      setError('Failed to join the meeting. Please try again.');
+    }
+  };
+
   if (callTimeNotArrived)
     return (
       <Alert
@@ -71,32 +123,15 @@ const MeetingSetup = ({
       />
     );
 
-    const handleJoinMeeting = async () => {
-      if (!username.trim()) return;
-    
-      try {
-        localStorage.setItem('meetingUsername', username);
-        
-        // Add this line
-        await call.update({
-          custom: {
-            displayName: username
-          }
-        });
-        
-        await call.join();
-        setIsSetupComplete(true);
-      } catch (error) {
-        console.error('Error joining meeting:', error);
-      }
-    };
-
   return (
     <div className="flex h-screen w-full flex-col items-center justify-center gap-6 text-white">
       <h1 className="text-center text-2xl font-bold">Setup</h1>
-      
-      <VideoPreview />
-      
+
+      {/* Video Preview with Username Overlay */}
+      <div className="relative" ref={videoPreviewRef}>
+        <VideoPreview />
+      </div>
+
       <div className="flex flex-col items-center gap-4 w-full max-w-md">
         <div className="w-full space-y-2">
           <label className="text-sm font-medium text-gray-200">
@@ -105,9 +140,13 @@ const MeetingSetup = ({
           <Input
             placeholder="Enter your display name"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setError(''); // Clear error when user types
+            }}
             className="bg-dark-4 border-dark-4 text-white placeholder:text-gray-500"
           />
+          {error && <p className="text-sm text-red-500">{error}</p>}
         </div>
 
         <div className="flex h-16 items-center justify-center gap-3">
