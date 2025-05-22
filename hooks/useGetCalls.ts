@@ -11,11 +11,11 @@ export const useGetCalls = () => {
   useEffect(() => {
     const loadCalls = async () => {
       if (!client || !user?.id) return;
-      
+
       setIsLoading(true);
 
       try {
-        // https://getstream.io/video/docs/react/guides/querying-calls/#filters
+        // Fetch all calls
         const { calls } = await client.queryCalls({
           sort: [{ field: 'starts_at', direction: -1 }],
           filter_conditions: {
@@ -29,7 +29,7 @@ export const useGetCalls = () => {
 
         setCalls(calls);
       } catch (error) {
-        console.error(error);
+        console.error('Failed to fetch calls:', error);
       } finally {
         setIsLoading(false);
       }
@@ -40,13 +40,18 @@ export const useGetCalls = () => {
 
   const now = new Date();
 
+  // Filter ended calls
   const endedCalls = calls?.filter(({ state: { startsAt, endedAt } }: Call) => {
-    return (startsAt && new Date(startsAt) < now) || !!endedAt
-  })
+    return (startsAt && new Date(startsAt) < now) || !!endedAt;
+  });
 
+  // Filter upcoming calls
   const upcomingCalls = calls?.filter(({ state: { startsAt } }: Call) => {
-    return startsAt && new Date(startsAt) > now
-  })
+    return startsAt && new Date(startsAt) > now;
+  });
 
-  return { endedCalls, upcomingCalls, callRecordings: calls, isLoading }
+  // Fetch recordings for ended calls
+  const callRecordings = endedCalls?.map((call) => call);
+
+  return { endedCalls, upcomingCalls, callRecordings, isLoading };
 };
